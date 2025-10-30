@@ -8,6 +8,12 @@ services:
       - PYTHONUNBUFFERED=1
     networks:
       - dobot_network
+    ports:
+      - "29999:29999"
+      - "30003:30003"
+      - "30004:30004"
+      - "30005:30005"
+      - "30006:30006"
 
 networks:
   dobot_network:

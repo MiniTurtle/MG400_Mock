@@ -17,6 +17,7 @@ import logging
 import time
 from queue import Queue
 from socket import error as SocketError
+from threading import Thread
 
 from dobot_command.dobot_hardware import DobotHardware
 
@@ -40,14 +41,22 @@ class RealtimeFeedbackTcpInterface(TcpInterfaceBase):
     def callback(self, socket, max_receive_bytes):
         while True:
             connection, _ = socket.accept()
+            # keep reference if needed
             self.__socket_pool.put(connection)
-            with connection:
-                while True:
-                    try:
-                        packet = self.__dobot.get_status()
-                        connection.send(packet)
-                    except SocketError:
-                        connection.close()
-                        break
+            Thread(
+                target=self.__handle_client,
+                args=(connection,),
+                daemon=True,
+            ).start()
 
-                    time.sleep(self.__realtime_feedback_period)
+    def __handle_client(self, connection) -> None:
+        with connection:
+            while True:
+                try:
+                    packet = self.__dobot.get_status()
+                    connection.send(packet)
+                except SocketError:
+                    # client disconnected or send failed
+                    break
+
+                time.sleep(self.__realtime_feedback_period)

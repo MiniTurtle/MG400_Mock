@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import logging
+from threading import Thread
 
 from dobot_command.dashboard_command import DashboardCommands
 from dobot_command.dobot_hardware import DobotHardware
@@ -35,19 +36,27 @@ class DashboardTcpInterface(TcpInterfaceBase):
     def callback(self, socket, max_receive_bytes):
         while True:
             connection, _ = socket.accept()
-            with connection:
-                while True:
-                    recv = connection.recv(max_receive_bytes).decode()
-                    if not recv:
-                        break
-                    self.logger.info(recv)
+            Thread(
+                target=self.__handle_client,
+                args=(connection, max_receive_bytes),
+                daemon=True,
+            ).start()
 
-                    try:
-                        res = FunctionParser.exec(
-                            self.__dashboard_commands, recv)
-                    except ValueError as err:
-                        self.logger.error(err)
+    def __handle_client(self, connection, max_receive_bytes: int) -> None:
+        with connection:
+            while True:
+                data = connection.recv(max_receive_bytes)
+                if not data:
+                    break
+                recv = data.decode()
+                self.logger.info(recv)
 
-                    return_str = res+recv+";"
-                    print("RETURN: " + return_str)
-                    connection.send((return_str).encode())
+                try:
+                    res = FunctionParser.exec(self.__dashboard_commands, recv)
+                except ValueError as err:
+                    self.logger.error(err)
+                    res = "-"  # preserve protocol shape on error
+
+                return_str = res + recv + ";"
+                print("RETURN: " + return_str)
+                connection.send(return_str.encode())

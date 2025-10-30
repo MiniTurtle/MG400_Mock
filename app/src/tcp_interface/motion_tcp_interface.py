@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import logging
+from threading import Thread
 from queue import Queue
 
 from dobot_command.dobot_hardware import DobotHardware
@@ -36,11 +37,20 @@ class MotionTcpInterface(TcpInterfaceBase):
     def callback(self, socket, max_receive_bytes):
         while True:
             connection, _ = socket.accept()
+            # keep a reference if needed elsewhere
             self.__socket_pool.put(connection)
-            with connection:
-                while True:
-                    recv = connection.recv(max_receive_bytes).decode()
-                    if not recv:
-                        break
-                    self.logger.info(recv)
-                    self.__dobot.motion_stack(recv)
+            Thread(
+                target=self.__handle_client,
+                args=(connection, max_receive_bytes),
+                daemon=True,
+            ).start()
+
+    def __handle_client(self, connection, max_receive_bytes: int) -> None:
+        with connection:
+            while True:
+                data = connection.recv(max_receive_bytes)
+                if not data:
+                    break
+                recv = data.decode()
+                self.logger.info(recv)
+                self.__dobot.motion_stack(recv)
