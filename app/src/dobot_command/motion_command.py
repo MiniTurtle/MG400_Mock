@@ -49,6 +49,8 @@ class MotionCommands:
         tool_target = list(map(float, args[0:4])) + [0.0, 0.0]
         if not self.__dobot.set_tool_vector_target(tool_target):
             self.__dobot.log_warning_msg("Failed to calculate path.")
+            # Outside of workspace or IK failure -> set standardized error id
+            self.__dobot.set_error_id(-40000)
             return False
 
         accepted = self.__dobot.generate_target_in_joint()
@@ -57,8 +59,10 @@ class MotionCommands:
             self.__dobot.reset_time_index()
             self.__dobot.log_info_msg("The dobot accepts MovJ command.")
             return True
-
+        # Not accepted
         self.__dobot.log_warning_msg("out of range.")
+        # Trajectory generation failed due to workspace limits
+        self.__dobot.set_error_id(-40000)
         return False
 
     def MoveJog(self, args):
@@ -89,6 +93,8 @@ class MotionCommands:
             return True
 
         self.__dobot.log_info_msg("out of range.")
+        # Jog target out of workspace
+        self.__dobot.set_error_id(-40000)
         return False
 
     def MovL(self, args):
@@ -115,6 +121,7 @@ class MotionCommands:
         tool_target = list(map(float, args[0:4])) + [0.0, 0.0]
         if not self.__dobot.set_tool_vector_target(tool_target):
             self.__dobot.log_warning_msg("Failed to calculate path")
+            self.__dobot.set_error_id(-40000)
             return False
 
         accepted = self.__dobot.generate_target_in_tool()
@@ -123,8 +130,8 @@ class MotionCommands:
             self.__dobot.reset_time_index()
             self.__dobot.log_info_msg("The dobot accepts MovL command.")
             return True
-
         self.__dobot.log_info_msg("The straight path is not feasible.")
+        self.__dobot.set_error_id(-40000)
         return False
 
     def JointMovJ(self, args):
@@ -140,6 +147,7 @@ class MotionCommands:
         q_target = list(map(float, args[0:4])) + [0.0, 0.0]
         if not self.__dobot.set_q_target(q_target):
             self.__dobot.log_warning_msg("The target is invalid.")
+            self.__dobot.set_error_id(-40000)
             return False
 
         accepted = self.__dobot.generate_target_in_joint()
@@ -148,6 +156,6 @@ class MotionCommands:
             self.__dobot.reset_time_index()
             self.__dobot.log_info_msg("The dobot accepts MovJ command.")
             return True
-
         self.__dobot.log_warning_msg("out of range.")
+        self.__dobot.set_error_id(-40000)
         return False

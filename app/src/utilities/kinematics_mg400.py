@@ -19,9 +19,16 @@ def in_working_space(angles):
     j_3_able = (J3_MIN <= j_3 <= J3_MAX)
     j_3_1_able = (J3_1_MIN <= (j_3 - j_2) <= J3_1_MAX)
     j_4_able = (J4_MIN <= j_4 <= J4_MAX)
+    
     if j_1_able and j_2_able and \
             j_3_able and j_3_1_able and j_4_able:
         return True
+    
+    print("j1:", j_1, j_1_able)
+    print("j2:", j_2, j_2_able)
+    print("j3:", j_3, j_3_able)
+    print("j3_1:", j_3 - j_2, j_3_1_able)
+    print("j4:", j_4, j_4_able)
     return False
 
 
