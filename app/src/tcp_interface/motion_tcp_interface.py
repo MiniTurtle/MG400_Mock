@@ -38,6 +38,8 @@ class MotionTcpInterface(TcpInterfaceBase):
         self.__dobot = dobot
         self.__motion_commands = MotionCommands(dobot)
 
+        self.__motion_commands_parser = MotionCommands(DobotHardware())
+
     def callback(self, socket, max_receive_bytes):
         while True:
             connection, _ = socket.accept()
@@ -60,7 +62,7 @@ class MotionTcpInterface(TcpInterfaceBase):
                 # Execute motion command and always return a TCP response
                 try:
                     # Use existing FunctionParser to dispatch to MotionCommands
-                    result = FunctionParser.exec(self.__motion_commands, recv)
+                    result = FunctionParser.exec(self.__motion_commands_parser, recv)
                     # Success or handled failure: reply with current error id
                     error_id = self.__dobot.get_error_id()
                     res = generate_return_msg(int(error_id))

@@ -159,3 +159,20 @@ class MotionCommands:
         self.__dobot.log_warning_msg("out of range.")
         self.__dobot.set_error_id(-40000)
         return False
+    
+    def Wait(self, args):
+        """Wait"""
+        if len(args) < 1:
+            self.__dobot.log_warning_msg("The number of arguments is invalid.")
+            return False
+
+        wait_time = float(args[0])
+        if wait_time < 0.0:
+            self.__dobot.log_warning_msg("The wait time is invalid.")
+            return False
+            
+        wait_time = min(max(wait_time, 0), 3600*1000)
+        self.__dobot.log_info_msg(f"The dobot will wait for {wait_time} ms.")
+        # Schedule a non-blocking wait handled by DobotThread/update_status
+        self.__dobot.start_wait(wait_time)
+        return True

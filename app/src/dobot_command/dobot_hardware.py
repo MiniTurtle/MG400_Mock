@@ -101,6 +101,9 @@ class DobotHardware:
         self.__timestep = 5.0 / 1000
         self.__feedback_time = 8.0 / 1000
 
+        # wait command handling
+        self.__wait_remaining_steps = 0
+
     def normalize_vec(self, vec):
         """normalize_vec"""
         return vec / np.linalg.norm(vec)
@@ -443,6 +446,14 @@ class DobotHardware:
                 return False
 
     def __q_controller(self):
+        # handle wait command: just hold pose for specified duration
+        if self.__wait_remaining_steps > 0:
+            self.__wait_remaining_steps -= 1
+            if self.__wait_remaining_steps == 0:
+                self.__robot_mode = robot_mode.MODE_ENABLE
+                self.__log_info_msg("The wait task is finished.")
+            return
+
         if self.__robot_mode is robot_mode.MODE_RUNNING:
             self.__q_actual = self.__q_target_set[self.__time_index]
             self.__time_index += 1
@@ -477,6 +488,20 @@ class DobotHardware:
         with self.__lock:
             self.__q_controller()
             self.__update_actual_status()
+
+    def start_wait(self, wait_time_ms: float):
+        """start_wait
+
+        Schedule a non-blocking wait while holding the current pose.
+        """
+        with self.__lock:
+            total_time_s = wait_time_ms / 1000.0
+            steps = int(total_time_s / self.__timestep)
+            if steps <= 0:
+                steps = 1
+            self.__wait_remaining_steps = steps
+            # ensure controller treats this as active
+            self.__robot_mode = robot_mode.MODE_RUNNING
 
     def clear_error(self):
         """clear_error"""
