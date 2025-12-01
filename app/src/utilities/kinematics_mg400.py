@@ -24,11 +24,6 @@ def in_working_space(angles):
             j_3_able and j_3_1_able and j_4_able:
         return True
     
-    print("j1:", j_1, j_1_able)
-    print("j2:", j_2, j_2_able)
-    print("j3:", j_3, j_3_able)
-    print("j3_1:", j_3 - j_2, j_3_1_able)
-    print("j4:", j_4, j_4_able)
     return False
 
 
