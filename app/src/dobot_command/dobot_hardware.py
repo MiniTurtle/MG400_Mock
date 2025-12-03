@@ -216,7 +216,7 @@ class DobotHardware:
         with self.__lock:
             self.__error_id = error_id
 
-    def set_robot_mode(self, mode: int):
+    def  set_robot_mode(self, mode: int):
         """set_robot_mode"""
         with self.__lock:
             self.__robot_mode = mode
@@ -502,6 +502,12 @@ class DobotHardware:
             self.__wait_remaining_steps = steps
             # ensure controller treats this as active
             self.__robot_mode = robot_mode.MODE_RUNNING
+
+    def clear_wait(self):
+        """clear_wait"""
+        with self.__lock:
+            self.__wait_remaining_steps = 0
+            self.__robot_mode = robot_mode.MODE_ENABLE
 
     def clear_error(self):
         """clear_error"""
