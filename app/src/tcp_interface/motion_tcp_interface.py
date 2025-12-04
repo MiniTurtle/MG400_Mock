@@ -24,6 +24,7 @@ from utilities.utils_for_command import generate_return_msg
 
 from .tcp_interface_base import TcpInterfaceBase
 
+from dobot_command import robot_mode
 
 class MotionTcpInterface(TcpInterfaceBase):
     """MotionTcpInterface"""
@@ -33,12 +34,13 @@ class MotionTcpInterface(TcpInterfaceBase):
     def __init__(self, ip: str, port: int, dobot: DobotHardware) -> None:
         super().__init__(ip, port, self.callback)
 
+        self.__dobot_parser = DobotHardware()
+        self.__motion_commands_parser = MotionCommands(self.__dobot_parser)
         self.logger = logging.getLogger("Motion Tcp Interface")
         self.__socket_pool = Queue()
         self.__dobot = dobot
-        self.__motion_commands = MotionCommands(dobot)
 
-        self.__motion_commands_parser = MotionCommands(DobotHardware())
+        
 
     def callback(self, socket, max_receive_bytes):
         while True:
@@ -59,18 +61,33 @@ class MotionTcpInterface(TcpInterfaceBase):
                     break
                 recv = data.decode()
                 self.logger.info(recv)
+
+                error_id = 0
                 # Execute motion command and always return a TCP response
                 try:
+                    self.__dobot_parser.clear_error()
+                    self.__dobot_parser.clear_motion_queue()
+                    self.__dobot_parser.clear_wait()
+                    self.__dobot_parser.set_robot_mode(robot_mode.MODE_ENABLE)
+                    
                     # Use existing FunctionParser to dispatch to MotionCommands
                     result = FunctionParser.exec(self.__motion_commands_parser, recv)
-                    # Success or handled failure: reply with current error id
-                    error_id = self.__dobot.get_error_id()
+                    if not result:
+                        # Success or handled failure: reply with current error id
+                        error_id = self.__dobot_parser.get_error_id()
+                        if error_id == 0:
+                            error_id = -1
+
                     res = generate_return_msg(int(error_id))
-                    self.__dobot.motion_stack(recv)
+                    
                 except ValueError as err:
                     # Unknown command or parse error: mirror dashboard behavior
                     self.logger.error(err)
                     res = "-"
+                    error_id = -1
+
+                if error_id == 0:
+                    self.__dobot.motion_stack(recv)
 
                 return_str = res + recv + ";"
                 self.logger.info("RETURN: %s", return_str)

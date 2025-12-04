@@ -14,4 +14,5 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
+sudo docker compose -f docker/docker-compose.yml down -v
 sudo docker compose -f docker/docker-compose.yml up

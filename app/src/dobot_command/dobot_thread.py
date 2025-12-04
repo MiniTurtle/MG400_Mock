@@ -36,6 +36,8 @@ class DobotThread(threading.Thread):
 
     def run(self):
         """run"""
+
+        loop_start = time.time()
         while True:
             empty, command = self.__dobot.motion_unstack()
 
@@ -46,4 +48,11 @@ class DobotThread(threading.Thread):
                 except ValueError as err:
                     self.logger.error(err)
             self.__dobot.update_status()
-            time.sleep(self.__timestep)
+
+            elapsed = time.time() - loop_start
+            sleep_amount = self.__timestep - elapsed
+            if sleep_amount < 0:
+                sleep_amount = 0
+
+            loop_start = time.time()
+            time.sleep(sleep_amount)

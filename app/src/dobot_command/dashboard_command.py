@@ -87,6 +87,7 @@ class DashboardCommands:
     def ResetRobot(self, args):
         """ResetRobot"""
         _ = args  # for pylint waring
+        self.__dobot.clear_motion_queue()
         self.__dobot.clear_wait()
         self.__dobot.set_robot_mode(robot_mode.MODE_ENABLE)
         error_id = self.__dobot.get_error_id()
