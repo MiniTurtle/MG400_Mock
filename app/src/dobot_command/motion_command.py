@@ -27,13 +27,14 @@ class MotionCommands:
 
     def MovJ(self, args):
         """MovJ"""
+        command_type = "queue"
         # TODO: Implement user coordinate system
         if self.__dobot.get_robot_mode() is not robot_mode.MODE_ENABLE:
             self.__dobot.log_warning_msg("The robot mode is not enable.")
-            return False
+            return False, command_type
         if len(args) < 4:
             self.__dobot.log_warning_msg("The number of arguments is invalid.")
-            return False
+            return False, command_type
 
         if len(args) > 4:
             user, tool, speed_j, acc_j = args_parser_mov_j(args[4:])
@@ -51,29 +52,30 @@ class MotionCommands:
             self.__dobot.log_warning_msg("Failed to calculate path.")
             # Outside of workspace or IK failure -> set standardized error id
             self.__dobot.set_error_id(-40000)
-            return False
+            return False, command_type
 
         accepted = self.__dobot.generate_target_in_joint()
         if accepted:
             self.__dobot.set_robot_mode(robot_mode.MODE_RUNNING)
             self.__dobot.reset_time_index()
             self.__dobot.log_info_msg("The dobot accepts MovJ command.")
-            return True
+            return True, command_type
         # Not accepted
         self.__dobot.log_warning_msg("out of range.")
         # Trajectory generation failed due to workspace limits
         self.__dobot.set_error_id(-40000)
-        return False
+        return False, command_type
 
     def MoveJog(self, args):
         """MoveJog"""
+        command_type = "queue"
         # TODO: Implement user and tool coordinate system
         if self.__dobot.get_robot_mode() is not robot_mode.MODE_ENABLE:
             self.__dobot.log_warning_msg("The robot mode is not enable.")
-            return False
+            return False, command_type
         if len(args) < 1:
             self.__dobot.log_warning_msg("The number of arguments is invalid.")
-            return False
+            return False, command_type
 
         if len(args) >= 1:
             coord_type, user, tool = args_parser_jog(args[1:])
@@ -90,22 +92,23 @@ class MotionCommands:
         if accepted:
             self.__dobot.set_robot_mode(robot_mode.MODE_JOG)
             self.__dobot.log_info_msg("The dobot accepts MoveJog command.")
-            return True
+            return True, command_type
 
         self.__dobot.log_info_msg("out of range.")
         # Jog target out of workspace
         self.__dobot.set_error_id(-40000)
-        return False
+        return False, command_type
 
     def MovL(self, args):
         """MovL"""
+        command_type = "queue"
         # TODO: Implement user coordinate system
         if self.__dobot.get_robot_mode() is not robot_mode.MODE_ENABLE:
             self.__dobot.log_warning_msg("The robot mode is not enable.")
-            return False
+            return False, command_type
         if len(args) < 4:
             self.__dobot.log_warning_msg("The number of arguments is invalid.")
-            return False
+            return False, command_type
 
         if len(args) > 4:
             user, tool, speed_l, acc_l = args_parser_mov_l(args[4:])
@@ -122,57 +125,98 @@ class MotionCommands:
         if not self.__dobot.set_tool_vector_target(tool_target):
             self.__dobot.log_warning_msg("Failed to calculate path")
             self.__dobot.set_error_id(-40000)
-            return False
+            return False, command_type
 
         accepted = self.__dobot.generate_target_in_tool()
         if accepted:
             self.__dobot.set_robot_mode(robot_mode.MODE_RUNNING)
             self.__dobot.reset_time_index()
             self.__dobot.log_info_msg("The dobot accepts MovL command.")
-            return True
+            return True, command_type
         self.__dobot.log_info_msg("The straight path is not feasible.")
         self.__dobot.set_error_id(-40000)
-        return False
+        return False, command_type
 
     def JointMovJ(self, args):
         """JointMovJ"""
+        command_type = "queue"
         if self.__dobot.get_robot_mode() is not robot_mode.MODE_ENABLE:
             self.__dobot.log_warning_msg("The robot mode is not enable.")
-            return False
+            return False, command_type
         if len(args) < 4:
             self.__dobot.log_warning_msg("The number of arguments is invalid.")
-            return False
+            return False, command_type
 
         # TODO: Support options, e.g., user, tool, speed_j, acc_j, cp.
         q_target = list(map(float, args[0:4])) + [0.0, 0.0]
         if not self.__dobot.set_q_target(q_target):
             self.__dobot.log_warning_msg("The target is invalid.")
             self.__dobot.set_error_id(-40000)
-            return False
+            return False, command_type
 
         accepted = self.__dobot.generate_target_in_joint()
         if accepted:
             self.__dobot.set_robot_mode(robot_mode.MODE_RUNNING)
             self.__dobot.reset_time_index()
             self.__dobot.log_info_msg("The dobot accepts MovJ command.")
-            return True
+            return True, command_type
         self.__dobot.log_warning_msg("out of range.")
         self.__dobot.set_error_id(-40000)
-        return False
+        return False, command_type
     
     def Wait(self, args):
         """Wait"""
+        command_type = "queue"
         if len(args) < 1:
             self.__dobot.log_warning_msg("The number of arguments is invalid.")
-            return False
+            return False, command_type
 
         wait_time = float(args[0])
         if wait_time < 0.0:
             self.__dobot.log_warning_msg("The wait time is invalid.")
-            return False
+            return False, command_type
             
         wait_time = min(max(wait_time, 0), 3600*1000)
         self.__dobot.log_info_msg(f"The dobot will wait for {wait_time} ms.")
         # Schedule a non-blocking wait handled by DobotThread/update_status
         self.__dobot.start_wait(wait_time)
-        return True
+        return True, command_type
+
+    def ToolDo(self, args):
+        """Set digital output (queued)."""
+        command_type = "queue"
+        if len(args) != 2:
+            self.__dobot.log_warning_msg("The number of arguments is invalid.")
+            return False, command_type
+
+        index = int(args[0])
+        status = int(args[1])
+
+        # Forward to underlying Dobot hardware; expect boolean result
+        accepted = self.__dobot.tool_do(index, status)
+        if accepted:
+            self.__dobot.log_info_msg(
+                f"ToolDo command: index={index}, status={status}."
+            )
+            return True, command_type
+
+        self.__dobot.log_warning_msg(
+            f"Failed to ToolDo command: index={index}, status={status}."
+        )
+        return False, command_type
+
+    def ToolDOExecute(self, args):
+        """Set digital output immediately (non-queued)."""
+        command_type = "immediate"
+
+        if len(args) != 2:
+            self.__dobot.log_warning_msg("The number of arguments is invalid.")
+            return False, command_type
+
+        index = int(args[0])
+        status = int(args[1])
+        self.__dobot.log_info_msg(
+            f"ToolDOExecute command: index={index}, status={status}."
+        )
+        ok, _ = self.ToolDo(args)
+        return ok, command_type

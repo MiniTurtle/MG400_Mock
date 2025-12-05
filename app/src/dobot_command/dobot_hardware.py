@@ -20,6 +20,7 @@ from queue import Queue
 from typing import List
 
 import numpy as np
+import socket
 from dobot_command import robot_mode
 from tcp_interface.realtime_packet import RealtimePacket
 from utilities.coordinate_loader import load_coordinate
@@ -527,3 +528,70 @@ class DobotHardware:
         """clear_error"""
         with self.__lock:
             self.__error_id = 0
+
+    def tool_do(self, index: int, status: int) -> bool:
+        """Control tool digital output via TCP.
+
+        Opens a TCP connection to 192.168.1.17:9000 and sends
+        an ASCII command "ToolDO {index} {status}".
+
+        This method ensures the message is actually sent before
+        the socket is closed by checking the return value of
+        ``sendall`` and shutting down the write side explicitly.
+        """
+        message = f"ToolDO {index} {status}".encode("ascii")
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                # Allow up to 2 seconds for the whole operation
+                sock.settimeout(2.0)
+                sock.connect(("192.168.1.17", 9000))
+                # sendall() blocks until all data is sent or an error occurs
+                sock.sendall(message + b"\n")
+
+                self.__log_info_msg(f"Sent Tool DO command: {message!r}, waiting for echo...")
+
+                # Sleep (block) until the echoed message is received or
+                # the 2-second timeout is hit.
+                echoed = b""
+                try:
+                    while len(echoed) < len(message):
+                        chunk = sock.recv(len(message) - len(echoed))
+                        if not chunk:
+                            # Peer closed connection before full echo
+                            break
+                        echoed += chunk
+                except socket.timeout:
+                    self.__log_warning_msg(
+                        "Timed out waiting for Tool DO echo from 192.168.1.17:9000."
+                    )
+                    return False
+
+                self.__log_info_msg(f"Sent Tool DO command: {message!r}, received echo: {echoed!r}")
+                if echoed != message:
+                    self.__log_warning_msg(
+                        f"Tool DO echo mismatch: sent {message!r}, received {echoed!r}"
+                    )
+                    return False
+
+                # Only now that we have received the expected echo do we
+                # explicitly shut down the write side and let the context
+                # manager close the socket.
+                try:
+                    sock.shutdown(socket.SHUT_WR)
+                except OSError:
+                    # If shutdown fails (e.g. connection already closed),
+                    # we still consider the operation successful because
+                    # sendall() and echo reception both succeeded.
+                    pass
+
+                return True
+        except ConnectionRefusedError:
+            self.__log_warning_msg(
+                "Failed to set tool DO: connection to 192.168.1.17:9000 was refused. "
+                "Is the tool server running?"
+            )
+        except (socket.timeout, OSError) as err:
+            self.__log_warning_msg(
+                f"Failed to set tool DO due to network error: {err}"
+            )
+        return False

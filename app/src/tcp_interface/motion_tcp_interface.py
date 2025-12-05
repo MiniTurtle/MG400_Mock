@@ -39,8 +39,12 @@ class MotionTcpInterface(TcpInterfaceBase):
         self.logger = logging.getLogger("Motion Tcp Interface")
         self.__socket_pool = Queue()
         self.__dobot = dobot
+        self.__motion_commands = MotionCommands(dobot)
 
-        
+        # Override parser-side tool_do so it does nothing (no-op)
+        def _noop_tool_do(index, status):  # pylint: disable=unused-argument
+            return True
+        self.__dobot_parser.tool_do = _noop_tool_do
 
     def callback(self, socket, max_receive_bytes):
         while True:
@@ -71,7 +75,7 @@ class MotionTcpInterface(TcpInterfaceBase):
                     self.__dobot_parser.set_robot_mode(robot_mode.MODE_ENABLE)
                     
                     # Use existing FunctionParser to dispatch to MotionCommands
-                    result = FunctionParser.exec(self.__motion_commands_parser, recv)
+                    result, command_type = FunctionParser.exec(self.__motion_commands_parser, recv)
                     if not result:
                         # Success or handled failure: reply with current error id
                         error_id = self.__dobot_parser.get_error_id()
@@ -87,7 +91,11 @@ class MotionTcpInterface(TcpInterfaceBase):
                     error_id = -1
 
                 if error_id == 0:
-                    self.__dobot.motion_stack(recv)
+                    # Queue-type commands are enqueued; immediate ones are executed directly
+                    if command_type == "queue":
+                        self.__dobot.motion_stack(recv)
+                    elif command_type == "immediate":
+                        FunctionParser.exec(self.__motion_commands, recv)
 
                 return_str = res + recv + ";"
                 self.logger.info("RETURN: %s", return_str)
