@@ -50,6 +50,7 @@ class RealtimeFeedbackTcpInterface(TcpInterfaceBase):
             ).start()
 
     def __handle_client(self, connection) -> None:
+        loop_start = time.time()
         with connection:
             while True:
                 try:
@@ -59,4 +60,10 @@ class RealtimeFeedbackTcpInterface(TcpInterfaceBase):
                     # client disconnected or send failed
                     break
 
-                time.sleep(self.__realtime_feedback_period)
+                elapsed = time.time() - loop_start
+                sleep_amount = self.__realtime_feedback_period - elapsed
+                if sleep_amount < 0:
+                    sleep_amount = 0
+
+                loop_start = time.time()
+                time.sleep(sleep_amount)

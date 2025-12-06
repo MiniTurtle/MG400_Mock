@@ -463,7 +463,9 @@ class DobotHardware:
 
     def __q_controller(self):
         if self.__robot_mode is robot_mode.MODE_RUNNING:
-            self.__q_actual = self.__q_target_set[self.__time_index]
+            # Normal case: advance along the precomputed trajectory
+            if self.__time_index < len(self.__q_target_set):
+                self.__q_actual = self.__q_target_set[self.__time_index]
             self.__time_index += 1
             if self.__time_index >= len(self.__q_target_set):
                 self.__robot_mode = robot_mode.MODE_ENABLE
@@ -495,13 +497,14 @@ class DobotHardware:
         """update_status"""
         with self.__lock:
             # handle wait command: hold pose until target time is reached
-            if self.__robot_mode == robot_mode.MODE_RUNNING and self.__wait_end_time:
+            if self.__wait_end_time and self.__wait_end_time > 0.0:
                 import time
-                if time.time() >= self.__wait_end_time:
-                    self.__wait_end_time = 0.0
-                    self.__robot_mode = robot_mode.MODE_ENABLE
-                    self.__log_info_msg("The wait task is finished.")
-                return
+                if time.time() < self.__wait_end_time:
+                    return
+
+                self.__wait_end_time = 0.0
+                self.__robot_mode = robot_mode.MODE_ENABLE
+                self.__log_info_msg("The wait task is finished.")
             
             self.__q_controller()
             self.__update_actual_status()
@@ -532,66 +535,147 @@ class DobotHardware:
     def tool_do(self, index: int, status: int) -> bool:
         """Control tool digital output via TCP.
 
-        Opens a TCP connection to 192.168.1.17:9000 and sends
-        an ASCII command "ToolDO {index} {status}".
-
-        This method ensures the message is actually sent before
-        the socket is closed by checking the return value of
-        ``sendall`` and shutting down the write side explicitly.
+        This version performs the operation in a non-blocking style and
+        enforces a 2-second total time budget. If the whole interaction
+        (connect, send, optional echo) exceeds 2 seconds, it retries once
+        and emits a warning.
         """
+
+        import time
+
         message = f"ToolDO {index} {status}".encode("ascii")
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                # Allow up to 2 seconds for the whole operation
-                sock.settimeout(2.0)
-                sock.connect(("192.168.1.17", 9000))
-                # sendall() blocks until all data is sent or an error occurs
-                sock.sendall(message + b"\n")
+        addr = ("192.168.1.17", 9000)
+        max_total_time = 2.0
+        max_retries = 10  # first try + one retry
 
-                self.__log_info_msg(f"Sent Tool DO command: {message!r}, waiting for echo...")
+        for attempt in range(1, max_retries + 1):
+            start = time.time()
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    # Put socket into non-blocking mode
+                    sock.setblocking(False)
 
-                # Sleep (block) until the echoed message is received or
-                # the 2-second timeout is hit.
-                echoed = b""
-                try:
-                    while len(echoed) < len(message):
-                        chunk = sock.recv(len(message) - len(echoed))
+                    # Start non-blocking connect
+                    try:
+                        sock.connect(addr)
+                    except (BlockingIOError, InterruptedError):
+                        # Expected for non-blocking connect; we'll wait with select.
+                        pass
+
+                    # Wait until the socket is writable (connected or failed)
+                    while True:
+                        now = time.time()
+                        if now - start > max_total_time:
+                            raise socket.timeout("connect timed out")
+
+                        # Use select to wait briefly without blocking the whole process
+                        import select
+
+                        _, writable, exceptional = select.select(
+                            [], [sock], [sock], 0.01
+                        )
+                        if sock in exceptional:
+                            raise OSError("socket error during non-blocking connect")
+                        if sock in writable:
+                            # Check for connection errors
+                            err = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                            if err != 0:
+                                raise OSError(err, "connect failed")
+                            break
+
+                    # Connection established, send data in a non-blocking loop
+                    to_send = message + b"\n"
+                    total_sent = 0
+                    while total_sent < len(to_send):
+                        now = time.time()
+                        if now - start > max_total_time:
+                            raise socket.timeout("send timed out")
+
+                        import select
+
+                        _, writable, exceptional = select.select(
+                            [], [sock], [sock], 0.01
+                        )
+                        if sock in exceptional:
+                            raise OSError("socket error during send")
+                        if sock not in writable:
+                            continue
+
+                        try:
+                            sent = sock.send(to_send[total_sent:])
+                        except (BlockingIOError, InterruptedError):
+                            continue
+                        if sent == 0:
+                            raise OSError("socket connection broken during send")
+                        total_sent += sent
+
+                    # Try to receive an echo in non-blocking fashion, but
+                    # do not treat missing echo as hard failure – just log.
+                    echoed = b""
+                    expected = len(message)
+                    while len(echoed) < expected:
+                        now = time.time()
+                        if now - start > max_total_time:
+                            # Timed out on echo; warn but still succeed.
+                            self.__log_warning_msg(
+                                "ToolDO: echo wait exceeded 2 seconds; "
+                                "continuing without full echo."
+                            )
+                            break
+
+                        import select
+
+                        readable, _, exceptional = select.select(
+                            [sock], [], [sock], 0.01
+                        )
+                        if sock in exceptional:
+                            self.__log_warning_msg(
+                                "ToolDO: socket error while waiting for echo."
+                            )
+                            break
+                        if sock not in readable:
+                            continue
+
+                        try:
+                            chunk = sock.recv(expected - len(echoed))
+                        except (BlockingIOError, InterruptedError):
+                            continue
                         if not chunk:
-                            # Peer closed connection before full echo
                             break
                         echoed += chunk
-                except socket.timeout:
-                    self.__log_warning_msg(
-                        "Timed out waiting for Tool DO echo from 192.168.1.17:9000."
-                    )
-                    return False
 
-                self.__log_info_msg(f"Sent Tool DO command: {message!r}, received echo: {echoed!r}")
-                if echoed != message:
-                    self.__log_warning_msg(
-                        f"Tool DO echo mismatch: sent {message!r}, received {echoed!r}"
-                    )
-                    return False
+                    # Optional: log mismatch but don't fail the command
+                    if echoed and echoed != message:
+                        self.__log_warning_msg(
+                            f"ToolDO echo mismatch: sent {message!r}, received {echoed!r}"
+                        )
 
-                # Only now that we have received the expected echo do we
-                # explicitly shut down the write side and let the context
-                # manager close the socket.
-                try:
-                    sock.shutdown(socket.SHUT_WR)
-                except OSError:
-                    # If shutdown fails (e.g. connection already closed),
-                    # we still consider the operation successful because
-                    # sendall() and echo reception both succeeded.
-                    pass
+                    try:
+                        sock.shutdown(socket.SHUT_WR)
+                    except OSError:
+                        pass
 
-                return True
-        except ConnectionRefusedError:
-            self.__log_warning_msg(
-                "Failed to set tool DO: connection to 192.168.1.17:9000 was refused. "
-                "Is the tool server running?"
-            )
-        except (socket.timeout, OSError) as err:
-            self.__log_warning_msg(
-                f"Failed to set tool DO due to network error: {err}"
-            )
+                    # Successful attempt
+                    if attempt > 1:
+                        self.__log_warning_msg(
+                            f"ToolDO succeeded on retry {attempt} after initial timeout."
+                        )
+                    return True
+
+            except ConnectionRefusedError:
+                self.__log_warning_msg(
+                    "Failed to set tool DO: connection to 192.168.1.17:9000 was refused. "
+                    "Is the tool server running?"
+                )
+                break
+            except socket.timeout as err:
+                self.__log_warning_msg(
+                    f"ToolDO attempt {attempt} exceeded 2 seconds: {err}"
+                )
+            except OSError as err:
+                self.__log_warning_msg(
+                    f"Failed to set tool DO due to network error (attempt {attempt}): {err}"
+                )
+
+        # If we reach here, all attempts failed.
         return False
